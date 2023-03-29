@@ -1243,10 +1243,13 @@
         rbac-user (get-in request [:rbac-subject :login])
         ip-address (:remote-addr request)
         signee (first (remove clojure.string/blank? [rbac-user auth-name "CA"]))]
+
     [(i18n/trsn "Entity {1} {2} 1 certificate: {3}." 
                 "Entity {1} {2} {0} certificates: {3}." 
-                (count subjects) signee activity-type (str/join ", " subjects)
-     ) signee subjects ip-address]))
+                (count subjects) signee activity-type (str/join ", " subjects))
+     signee
+     subjects
+     ip-address]))
 
 (schema/defn ^:always-validate
   autosign-certificate-request!
