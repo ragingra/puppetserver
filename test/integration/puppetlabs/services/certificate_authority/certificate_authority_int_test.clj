@@ -613,7 +613,11 @@
                   act-proto/ActivityReportingService
                   []
                   (report-activity! [_this body]
-                    (swap! reported-activity conj body)))]
+                    (swap! reported-activity conj body)))
+        cert-path (str bootstrap/server-conf-dir "/ssl/certs/localhost.pem")
+        key-path (str bootstrap/server-conf-dir "/ssl/private_keys/localhost.pem")
+        ca-cert-path (str bootstrap/server-conf-dir "/ca/ca_crt.pem")
+        crl-path (str bootstrap/server-conf-dir "/ssl/crl.pem")]
 
   (testutils/with-stub-puppet-conf
       (bootstrap/with-puppetserver-running-with-services
@@ -622,11 +626,11 @@
         (bootstrap/load-dev-config-with-overrides
         {:jruby-puppet
           {:gem-path [(ks/absolute-path jruby-testutils/gem-path)]}
-          :webserver
-          {:ssl-cert (str bootstrap/server-conf-dir "/ssl/certs/localhost.pem")
-          :ssl-key (str bootstrap/server-conf-dir "/ssl/private_keys/localhost.pem")
-          :ssl-ca-cert (str bootstrap/server-conf-dir "/ca/ca_crt.pem")
-          :ssl-crl-path (str bootstrap/server-conf-dir "/ssl/crl.pem")}})
+         :webserver
+          {:ssl-cert cert-path
+           :ssl-key key-path
+           :ssl-ca-cert ca-cert-path
+           :ssl-crl-path crl-path}})
         (let [request-dir (str bootstrap/server-conf-dir "/ca/requests")
               key-pair (ssl-utils/generate-key-pair)
               certname "test_cert"
@@ -634,14 +638,12 @@
               csr (ssl-utils/generate-certificate-request key-pair subjectDN)
               saved-csr (str request-dir "/test_cert.pem")
               status-url (str "https://localhost:8140/puppet-ca/v1/certificate_status/" certname)
-              request-opts {:ssl-cert (str bootstrap/server-conf-dir "/ca/ca_crt.pem")
-                            :ssl-key (str bootstrap/server-conf-dir "/ca/ca_key.pem")
-                            :ssl-ca-cert (str bootstrap/server-conf-dir "/ca/ca_crt.pem")
-                            :as :text
-                            :headers {"content-type" "text/plain"}}
-              ca-cert (ssl-utils/pem->ca-cert (str bootstrap/server-conf-dir "/ca/ca_crt.pem") (str bootstrap/server-conf-dir "/ca/ca_key.pem"))
-              x509 (ssl-utils/get-subject-from-x509-certificate ca-cert)
-              ca-name (ssl-utils/x500-name->CN x509)]
+              request-opts {:ssl-cert cert-path
+                            :ssl-key key-path
+                            :ssl-ca-cert ca-cert-path}
+              requester-name (-> (ssl-utils/pem->ca-cert cert-path key-path)
+                                 (ssl-utils/get-subject-from-x509-certificate)
+                                 (ssl-utils/x500-name->CN))]
 
 
           (ssl-utils/obj->pem! csr saved-csr)
@@ -652,7 +654,7 @@
                             (merge request-opts {:body "{\"desired_state\": \"signed\"}"
                                                   :headers {"content-type" "application/json"}}))
                   activity-events (get-in (first @reported-activity) [:commit :events])
-                  msg-matcher (re-pattern (str "Entity " ca-name " signed 1 certificate: " certname))]
+                  msg-matcher (re-pattern (str "Entity " requester-name " signed 1 certificate: " certname))]
               (is (= 204 (:status response)))
               (is (re-find msg-matcher (:message (first activity-events))))
               (is (= 1 (count @reported-activity)))))
@@ -663,7 +665,7 @@
               (merge request-opts {:body "{\"desired_state\": \"revoked\"}"
                                     :headers {"content-type" "application/json"}}))
                   activity-events (get-in (second @reported-activity) [:commit :events])
-                  msg-matcher (re-pattern (str "Entity " ca-name " revoked 1 certificate: " certname))]
+                  msg-matcher (re-pattern (str "Entity " requester-name " revoked 1 certificate: " certname))]
               (is (= 204 (:status response)))
               (is (re-find msg-matcher (:message (first activity-events))))
               (is (= 2 (count @reported-activity)))))
